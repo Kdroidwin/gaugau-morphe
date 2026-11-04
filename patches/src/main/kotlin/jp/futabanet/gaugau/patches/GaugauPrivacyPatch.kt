@@ -184,6 +184,28 @@ val gaugauPrivacyPatch = bytecodePatch(
         }
         workManagerInitializer.replaceInstruction(workManagerLogCalls.single(), "nop\nnop\nnop")
 
+        // PairIP normally fills this obfuscated service-name field during startup. Without that
+        // payload, SystemJobScheduler passes null to Context.getSystemService and WorkManager
+        // crashes while constructing its scheduler. Use Android's stable JobScheduler service key.
+        val systemJobScheduler = mutableClassDefBy("Lv7/a;").methods.single {
+            it.name == "b" &&
+                it.parameterTypes == listOf("Landroid/content/Context;") &&
+                it.returnType == "Landroid/app/job/JobScheduler;"
+        }
+        val jobSchedulerServiceName = systemJobScheduler.implementation!!.instructions.indices.single { index ->
+            val reference = (systemJobScheduler.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? FieldReference
+            reference?.definingClass == "Landroidx/constraintlayout/widget/edLM/WYlnqT;" &&
+                reference.name == "CdScXhr" &&
+                reference.type == "Ljava/lang/String;"
+        }
+        val jobSchedulerServiceRegister =
+            (systemJobScheduler.implementation!!.instructions[jobSchedulerServiceName] as OneRegisterInstruction).registerA
+        systemJobScheduler.replaceInstruction(
+            jobSchedulerServiceName,
+            "const-string v$jobSchedulerServiceRegister, \"jobscheduler\"",
+        )
+
         // GauGau runs an asynchronous Google Play Services gate during Application startup.
         // Report its success so the app does not open a Play Services recovery screen.
         mutableClassDefBy("Lbb/b;")
