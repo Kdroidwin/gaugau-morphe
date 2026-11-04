@@ -16,7 +16,7 @@ https://github.com/Kdroidwin/gaugau-morphe
 
 追加後、対象アプリのパッチを選び、手元の「がうがう」APKに適用します。対象APKのパッケージ名は `jp.futabanet.gaugau.app` です。
 
-> **配布状況:** リリース `v0.1.0` の`.mpp`バンドルを公開しました。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
+> **配布状況:** リリース `v0.1.1` では、お気に入りのインポート／エクスポート後に結果を受け取れずパッチ適用に失敗する問題を修正しました。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
 
 ## パッチ内容
 

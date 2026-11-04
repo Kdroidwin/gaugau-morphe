@@ -257,17 +257,24 @@ val gaugauPrivacyPatch = bytecodePatch(
             "invoke-static/range { p1 .. p1 }, Ljp/futabanet/gaugau/patch/GaugauSettingsRows;->addRows(Ljava/lang/Object;)V",
         )
 
-        // AppCompatActivity owns a final result callback, so dispatch the two SAF results there.
+        // Hook after GauGau's parent callback has dispatched the SAF result.
         val activityResult = mutableClassDefBy("Lk/j;")
             .methods.single {
                 it.name == "onActivityResult" &&
                     it.parameterTypes == listOf("I", "I", "Landroid/content/Intent;")
             }
-        val returnInstruction = activityResult.implementation!!.instructions.indices.single { index ->
-            activityResult.implementation!!.instructions[index].opcode.name == "RETURN_VOID"
+        val parentResultCallbacks = activityResult.implementation!!.instructions.indices.filter { index ->
+            val reference = (activityResult.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? MethodReference
+            reference?.definingClass == "Ld/m;" &&
+                reference.name == "onActivityResult" &&
+                reference.parameterTypes == listOf("I", "I", "Landroid/content/Intent;")
+        }
+        check(parentResultCallbacks.size == 1) {
+            "Expected one parent onActivityResult call in GauGau 1.46.0, found ${parentResultCallbacks.size}."
         }
         activityResult.addInstructions(
-            returnInstruction,
+            parentResultCallbacks.single() + 1,
             "invoke-static/range { p0 .. p3 }, Ljp/futabanet/gaugau/patch/FavoritesTransfer;->onActivityResult(Landroid/app/Activity;IILandroid/content/Intent;)V",
         )
 
