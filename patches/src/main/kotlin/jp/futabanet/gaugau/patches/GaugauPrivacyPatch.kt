@@ -23,7 +23,7 @@ private val gaugau146 = Compatibility(
 
 private val gaugauManifestPatch = resourcePatch(
     name = "GauGau privacy manifest settings",
-    description = "Disables Firebase collection metadata and removes advertising attribution permissions.",
+    description = "Disables Firebase auto-initialization and components and removes advertising attribution permissions.",
     default = false,
 ) {
     compatibleWith(gaugau146)
@@ -52,6 +52,21 @@ private val gaugauManifestPatch = resourcePatch(
                     .filter { it.getAttributeNS(android, "name").contains("appsflyer", ignoreCase = true) }
             }
             appFlyerComponents.forEach { it.parentNode.removeChild(it) }
+
+            // Opt-out flags alone still let FirebaseInitProvider construct FirebaseApp and run
+            // SDK registrars. Remove the initializer and Firebase-owned background components
+            // so trackers and FCM do not bootstrap on devices without GMS.
+            val firebaseComponents = listOf("provider", "service", "receiver").flatMap { tag ->
+                val nodes = application.getElementsByTagName(tag)
+                (0 until nodes.length)
+                    .mapNotNull { nodes.item(it) as? Element }
+                    .filter { element ->
+                        val name = element.getAttributeNS(android, "name")
+                        name.startsWith("com.google.firebase.") ||
+                            name.contains(".firebase.", ignoreCase = true)
+                    }
+            }
+            firebaseComponents.forEach { it.parentNode.removeChild(it) }
 
             val meta = mapOf(
                 "firebase_analytics_collection_enabled" to "false",
@@ -107,7 +122,7 @@ private fun MutableMethod.returnEarly(value: Any? = null) {
 @Suppress("unused")
 val gaugauPrivacyPatch = bytecodePatch(
     name = "GauGau privacy controls and favorites transfer",
-    description = "Adds privacy controls and favorites transfer, including support for devices without Google services.",
+    description = "Adds privacy controls and favorites transfer, disables Firebase telemetry registrars, and supports devices without Google services.",
     default = true,
 ) {
     compatibleWith(gaugau146)
