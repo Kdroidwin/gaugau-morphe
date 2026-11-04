@@ -37,6 +37,7 @@ tasks.register<JavaExec>("generatePatchesList") {
     dependsOn("build")
     classpath = sourceSets["main"].runtimeClasspath + patchListGeneratorClasspath
     mainClass.set("util.PatchListGeneratorKt")
+    systemProperty("patch.version", providers.gradleProperty("version").get())
 }
 
 tasks.named("publish") { dependsOn("generatePatchesList") }
