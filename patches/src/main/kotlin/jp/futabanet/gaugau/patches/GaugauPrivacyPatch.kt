@@ -6,7 +6,8 @@ import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.bytecodePatch
-import app.morphe.patcher.util.returnEarly
+import app.morphe.patcher.patch.resourcePatch
+import app.morphe.patcher.util.proxy.mutableTypes.MutableMethod
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import org.w3c.dom.Element
@@ -18,6 +19,89 @@ private val gaugau146 = Compatibility(
     targets = listOf(AppTarget(version = "1.46.0")),
 )
 
+private val gaugauManifestPatch = resourcePatch(
+    name = "GauGau privacy manifest settings",
+    description = "Disables Firebase collection metadata and removes advertising attribution permissions.",
+    default = false,
+) {
+    compatibleWith(gaugau146)
+    execute {
+        document("AndroidManifest.xml").use { manifest ->
+            val root = manifest.documentElement
+            val android = "http://schemas.android.com/apk/res/android"
+            val removedPermissions = setOf(
+                "com.google.android.gms.permission.AD_ID",
+                "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
+                "android.permission.ACCESS_ADSERVICES_AD_ID",
+                "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+            )
+            val permissionNodes = (0 until root.childNodes.length)
+                .mapNotNull { root.childNodes.item(it) as? Element }
+                .filter { it.tagName == "uses-permission" && it.getAttributeNS(android, "name") in removedPermissions }
+            permissionNodes.forEach(root::removeChild)
+
+            val application = (0 until root.childNodes.length)
+                .mapNotNull { root.childNodes.item(it) as? Element }
+                .single { it.tagName == "application" }
+            val appFlyerComponents = listOf("provider", "receiver", "service").flatMap { tag ->
+                val nodes = application.getElementsByTagName(tag)
+                (0 until nodes.length)
+                    .mapNotNull { nodes.item(it) as? Element }
+                    .filter { it.getAttributeNS(android, "name").contains("appsflyer", ignoreCase = true) }
+            }
+            appFlyerComponents.forEach { it.parentNode.removeChild(it) }
+
+            val meta = mapOf(
+                "firebase_analytics_collection_enabled" to "false",
+                "firebase_crashlytics_collection_enabled" to "false",
+                "firebase_performance_collection_deactivated" to "true",
+                "firebase_messaging_auto_init_enabled" to "false",
+                "firebase_sessions_enabled" to "false",
+                "google_analytics_adid_collection_enabled" to "false",
+            )
+            meta.forEach { (name, value) ->
+                val nodes = application.getElementsByTagName("meta-data")
+                val existing = (0 until nodes.length)
+                    .mapNotNull { nodes.item(it) as? Element }
+                    .firstOrNull { it.getAttributeNS(android, "name") == name }
+                val element = existing ?: manifest.createElement("meta-data").also(application::appendChild)
+                element.setAttributeNS(android, "android:name", name)
+                element.setAttributeNS(android, "android:value", value)
+            }
+        }
+    }
+}
+
+private fun MutableMethod.returnEarly(value: Any? = null) {
+    checkNotNull(implementation) { "Cannot add an early return to abstract method $name." }
+    val instructions = when (returnType) {
+        "V" -> {
+            require(value == null) { "Void method $name cannot return a value." }
+            "return-void"
+        }
+        "Z" -> {
+            val booleanValue = value as? Boolean ?: false
+            "const/4 v0, ${if (booleanValue) "0x1" else "0x0"}\nreturn v0"
+        }
+        "Ljava/lang/String;" -> {
+            val stringValue = value as? String
+            if (stringValue == null) {
+                "const/4 v0, 0x0\nreturn-object v0"
+            } else {
+                val escaped = stringValue
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\n", "\\n")
+                    .replace("\r", "\\r")
+                    .replace("\t", "\\t")
+                "const-string v0, \"$escaped\"\nreturn-object v0"
+            }
+        }
+        else -> error("Unsupported early return type $returnType in $name.")
+    }
+    addInstructions(0, instructions)
+}
+
 @Suppress("unused")
 val gaugauPrivacyPatch = bytecodePatch(
     name = "GauGau privacy controls and favorites transfer",
@@ -25,6 +109,7 @@ val gaugauPrivacyPatch = bytecodePatch(
     default = true,
 ) {
     compatibleWith(gaugau146)
+    dependsOn(gaugauManifestPatch)
     extendWith("extensions/extension.mpe")
 
     execute {
@@ -186,49 +271,5 @@ val gaugauPrivacyPatch = bytecodePatch(
             "invoke-static/range { p0 .. p3 }, Ljp/futabanet/gaugau/patch/FavoritesTransfer;->onActivityResult(Landroid/app/Activity;IILandroid/content/Intent;)V",
         )
 
-        // Disable Firebase collection and remove ad/install-attribution identifiers from the manifest.
-        document("AndroidManifest.xml").use { manifest ->
-            val root = manifest.documentElement
-            val android = "http://schemas.android.com/apk/res/android"
-            val removedPermissions = setOf(
-                "com.google.android.gms.permission.AD_ID",
-                "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
-                "android.permission.ACCESS_ADSERVICES_AD_ID",
-                "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
-            )
-            val permissionNodes = (0 until root.childNodes.length)
-                .mapNotNull { root.childNodes.item(it) as? Element }
-                .filter { it.tagName == "uses-permission" && it.getAttributeNS(android, "name") in removedPermissions }
-            permissionNodes.forEach(root::removeChild)
-
-            val application = (0 until root.childNodes.length)
-                .mapNotNull { root.childNodes.item(it) as? Element }
-                .single { it.tagName == "application" }
-            val appFlyerComponents = listOf("provider", "receiver", "service").flatMap { tag ->
-                val nodes = application.getElementsByTagName(tag)
-                (0 until nodes.length)
-                    .mapNotNull { nodes.item(it) as? Element }
-                    .filter { it.getAttributeNS(android, "name").contains("appsflyer", ignoreCase = true) }
-            }
-            appFlyerComponents.forEach { it.parentNode.removeChild(it) }
-
-            val meta = mapOf(
-                "firebase_analytics_collection_enabled" to "false",
-                "firebase_crashlytics_collection_enabled" to "false",
-                "firebase_performance_collection_deactivated" to "true",
-                "firebase_messaging_auto_init_enabled" to "false",
-                "firebase_sessions_enabled" to "false",
-                "google_analytics_adid_collection_enabled" to "false",
-            )
-            meta.forEach { (name, value) ->
-                val nodes = application.getElementsByTagName("meta-data")
-                val existing = (0 until nodes.length)
-                    .mapNotNull { nodes.item(it) as? Element }
-                    .firstOrNull { it.getAttributeNS(android, "name") == name }
-                val element = existing ?: manifest.createElement("meta-data").also(application::appendChild)
-                element.setAttributeNS(android, "android:name", name)
-                element.setAttributeNS(android, "android:value", value)
-            }
-        }
     }
 }

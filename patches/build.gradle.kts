@@ -1,5 +1,3 @@
-import app.morphe.patcher.patch.Patch
-
 group = "jp.futabanet.gaugau.patches"
 
 repositories {
@@ -20,10 +18,10 @@ patches {
     about {
         name = "GauGau Extras"
         description = "Privacy controls and favorites transfer for GauGau Manga"
-        source = ""
-        author = "GauGau Patch contributors"
+        source = "https://github.com/Kdroidwin/gaugau-morphe"
+        author = "Kdroidwin"
         contact = ""
-        website = ""
+        website = "https://github.com/Kdroidwin/gaugau-morphe"
         license = "GPLv3"
     }
 }
