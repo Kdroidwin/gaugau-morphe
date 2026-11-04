@@ -113,7 +113,12 @@ val gaugauPrivacyPatch = bytecodePatch(
     extendWith("extensions/extension.mpe")
 
     execute {
-        // PairIP startup still loads its VM; only the signature and Play licensing checks are skipped.
+        // Avoid the protected startup VM payload; it reaches libpairipcore and crashes on this GMS-free repatched build.
+        mutableClassDefBy("Lcom/pairip/StartupLauncher;")
+            .methods.single { it.name == "launch" && it.returnType == "V" && it.parameterTypes.isEmpty() }
+            .returnEarly()
+
+        // Skip the Java-side PairIP integrity and Play licensing checks too.
         mutableClassDefBy("Lcom/pairip/SignatureCheck;")
             .methods.single { it.name == "verifyIntegrity" && it.parameterTypes == listOf("Landroid/content/Context;") }
             .returnEarly()
