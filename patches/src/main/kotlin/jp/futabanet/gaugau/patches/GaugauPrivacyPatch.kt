@@ -162,6 +162,28 @@ val gaugauPrivacyPatch = bytecodePatch(
             .methods.single { it.name == "checkLicense" && it.parameterTypes == listOf("Landroid/content/Context;") }
             .returnEarly()
 
+        // PairIP normally supplies this obfuscated WorkManager log string. With its startup VM
+        // bypassed, Log.d(tag, null) crashes before WorkManager initialization completes. Skip
+        // only the diagnostic log call and let WorkManager initialize normally.
+        val workManagerInitializer = mutableClassDefBy("Landroidx/work/WorkManagerInitializer;")
+            .methods.single {
+                it.name == "b" &&
+                    it.parameterTypes == listOf("Landroid/content/Context;") &&
+                    it.returnType == "Ljava/lang/Object;"
+            }
+        val workManagerLogCalls = workManagerInitializer.implementation!!.instructions.indices.filter { index ->
+            val reference = (workManagerInitializer.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? MethodReference
+            reference?.definingClass == "Lr7/u;" &&
+                reference.name == "a" &&
+                reference.parameterTypes == listOf("Ljava/lang/String;", "Ljava/lang/String;") &&
+                reference.returnType == "V"
+        }
+        check(workManagerLogCalls.size == 1) {
+            "Expected one WorkManager startup log call in GauGau 1.46.0, found ${workManagerLogCalls.size}."
+        }
+        workManagerInitializer.replaceInstruction(workManagerLogCalls.single(), "nop\nnop\nnop")
+
         // GauGau runs an asynchronous Google Play Services gate during Application startup.
         // Report its success so the app does not open a Play Services recovery screen.
         mutableClassDefBy("Lbb/b;")
