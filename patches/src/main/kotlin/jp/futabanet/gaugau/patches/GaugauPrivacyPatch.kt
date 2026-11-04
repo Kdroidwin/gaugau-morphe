@@ -8,6 +8,8 @@ import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
 import app.morphe.patcher.util.proxy.mutableTypes.MutableMethod
+import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
+import com.android.tools.smali.dexlib2.iface.reference.FieldReference
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import org.w3c.dom.Element
@@ -117,6 +119,25 @@ val gaugauPrivacyPatch = bytecodePatch(
         mutableClassDefBy("Lcom/pairip/StartupLauncher;")
             .methods.single { it.name == "launch" && it.returnType == "V" && it.parameterTypes.isEmpty() }
             .returnEarly()
+
+        // PairIP's startup payload normally initializes this obfuscated Firebase resource key.
+        // Restore the known key so FirebaseInitProvider can read its optional API key without a null lookup.
+        val firebaseOptions = mutableClassDefBy("Lrc/i;").methods.single {
+            it.name == "a" &&
+                it.parameterTypes == listOf("Landroid/content/Context;") &&
+                it.returnType == "Lrc/i;"
+        }
+        val firebaseApiKeyName = firebaseOptions.implementation!!.instructions.indices.single { index ->
+            val reference = (firebaseOptions.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? FieldReference
+            reference?.definingClass == "Lln/ip/HKffFhtDyOyD;" && reference.name == "COew"
+        }
+        val firebaseApiKeyRegister =
+            (firebaseOptions.implementation!!.instructions[firebaseApiKeyName] as OneRegisterInstruction).registerA
+        firebaseOptions.replaceInstruction(
+            firebaseApiKeyName,
+            "const-string v$firebaseApiKeyRegister, \"google_api_key\"",
+        )
 
         // Skip the Java-side PairIP integrity and Play licensing checks too.
         mutableClassDefBy("Lcom/pairip/SignatureCheck;")
