@@ -16,7 +16,7 @@ https://github.com/Kdroidwin/gaugau-morphe
 
 追加後、対象アプリのパッチを選び、手元の「がうがう」APKに適用します。対象APKのパッケージ名は `jp.futabanet.gaugau.app` です。
 
-> **配布状況:** リリース `v0.1.6` では、PairIP起動VMを迂回した環境でWorkManagerが`JobScheduler`を取得できずに落ちる問題を修正しました。Firebase自動初期化の無効化とお気に入り転送の修正も含みます。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
+> **配布状況:** リリース `v0.1.7` では、PairIP起動VMを迂回した際に未設定となるWorkManagerのDB名、DBカラム名、既存DB移行SQLを補い、起動時のクラッシュを修正しました。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
 
 ## パッチ内容
 

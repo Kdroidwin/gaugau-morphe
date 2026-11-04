@@ -119,6 +119,32 @@ private fun MutableMethod.returnEarly(value: Any? = null) {
     addInstructions(0, instructions)
 }
 
+private fun MutableMethod.replaceStringFieldRead(
+    fieldOwner: String,
+    fieldName: String,
+    value: String,
+) {
+    val matches = implementation!!.instructions.indices.filter { index ->
+        val reference = (implementation!!.instructions[index] as? ReferenceInstruction)
+            ?.reference as? FieldReference
+        reference?.definingClass == fieldOwner &&
+            reference.name == fieldName &&
+            reference.type == "Ljava/lang/String;"
+    }
+    check(matches.size == 1) {
+        "Expected one read of $fieldOwner->$fieldName in $definingClass->$name, found ${matches.size}."
+    }
+    val index = matches.single()
+    val register = (implementation!!.instructions[index] as OneRegisterInstruction).registerA
+    val escaped = value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    replaceInstruction(index, "const-string v$register, \"$escaped\"")
+}
+
 @Suppress("unused")
 val gaugauPrivacyPatch = bytecodePatch(
     name = "GauGau privacy controls and favorites transfer",
@@ -183,6 +209,66 @@ val gaugauPrivacyPatch = bytecodePatch(
             "Expected one WorkManager startup log call in GauGau 1.46.0, found ${workManagerLogCalls.size}."
         }
         workManagerInitializer.replaceInstruction(workManagerLogCalls.single(), "nop\nnop\nnop")
+
+        // PairIP's VM also initializes strings embedded in WorkManager's obfuscated DAO and
+        // migration classes. WorkManager is used by GauGau's image/prefetch workers, so keep it
+        // enabled and restore the schema names it needs instead of disabling its initializer.
+        mutableClassDefBy("Lbn/g;")
+            .methods.single {
+                it.name == "x" &&
+                    it.parameterTypes == listOf("Landroid/content/Context;") &&
+                    it.returnType == "V"
+            }
+            .replaceStringFieldRead("Lo7/KaI/DYgH;", "iJy", "androidx.work.workdb")
+
+        val workSpecDao = mutableClassDefBy("La8/q;")
+        listOf(
+            Triple("Lh5/rt/KUPWpjZJXYt;", "xQoqeiRw", "flex_duration"),
+            Triple("Li8/CxQs/pFoulfSZB;", "oBclGk", "backoff_policy"),
+            Triple("Lsk/cq/TvBbzgUfwcz;", "AaYxtwIpEG", "next_schedule_time_override"),
+            Triple("Lf8/pIU/AMYUGJ;", "svfyTfIgThtod", "required_network_request"),
+            Triple("Lh5/rt/KUPWpjZJXYt;", "tsNHkLMhu", "output"),
+            Triple(
+                "Lcom/android/installreferrer/commons/eIyE/EKNMKDQiw;",
+                "ziRegHNQQJdztj",
+                "required_network_type",
+            ),
+            Triple("Lsd/UmC/JOLRcJLmWuVk;", "IsZCCexFUvTrDDF", "out_of_quota_policy"),
+            Triple("Luf/AIwk/KTnCvPZFijTVfj;", "ljZDDq", "required_network_type"),
+            Triple("Lln/ip/HKffFhtDyOyD;", "EmQGW", "state"),
+        ).forEach { (owner, field, column) ->
+            val matches = workSpecDao.methods.flatMap { method ->
+                method.implementation?.instructions?.indices
+                    ?.filter { index ->
+                        val reference = (method.implementation!!.instructions[index] as? ReferenceInstruction)
+                            ?.reference as? FieldReference
+                        reference?.definingClass == owner &&
+                            reference.name == field &&
+                            reference.type == "Ljava/lang/String;"
+                    }
+                    ?.map { method to it }
+                    .orEmpty()
+            }
+            check(matches.size == 1) {
+                "Expected one WorkSpec column read of $owner->$field, found ${matches.size}."
+            }
+            matches.single().first.replaceStringFieldRead(owner, field, column)
+        }
+
+        // Existing WorkManager databases can pass through this migration even when a new install
+        // avoids it. The VM-provided SQL fills nullable content-trigger blobs before the schema
+        // makes them non-null; use WorkManager's published migration statement directly.
+        mutableClassDefBy("Ls7/c;")
+            .methods.single {
+                it.name == "a" &&
+                    it.parameterTypes == listOf("Lc7/c;") &&
+                    it.returnType == "V"
+            }
+            .replaceStringFieldRead(
+                "Lo7/KaI/DYgH;",
+                "Xrnp",
+                "UPDATE workspec SET content_uri_triggers = x'' WHERE content_uri_triggers is NULL",
+            )
 
         // PairIP normally fills this obfuscated service-name field during startup. Without that
         // payload, SystemJobScheduler passes null to Context.getSystemService and WorkManager
