@@ -270,6 +270,41 @@ val gaugauPrivacyPatch = bytecodePatch(
                 "UPDATE workspec SET content_uri_triggers = x'' WHERE content_uri_triggers is NULL",
             )
 
+        // PairIP also initializes strings used while App.onCreate constructs its OkHttp cache.
+        // Restore the Okio path-normalization dot constant so the HTTP cache's FileSystem can load.
+        mutableClassDefBy("Lin/c;")
+            .methods.single { it.name == "<clinit>" && it.parameterTypes.isEmpty() && it.returnType == "V" }
+            .replaceStringFieldRead("Ldb/kYY/QDlwx;", "rOVUSySE", ".")
+
+        // OkHttp builds its default TLS ConnectionSpecs from this registry during client startup.
+        // These are CipherSuite.javaName values from OkHttp 4.12.0; the obfuscated VM fields are
+        // otherwise null after StartupLauncher is skipped.
+        val cipherSuiteRegistry = mutableClassDefBy("Lqm/m;").methods.single {
+            it.name == "<clinit>" && it.parameterTypes.isEmpty() && it.returnType == "V"
+        }
+        listOf(
+            Triple("Led/vKO/xJHeWZwVYA;", "YgUTrP", "SSL_RSA_WITH_NULL_SHA"),
+            Triple("Lh5/rt/KUPWpjZJXYt;", "TRr", "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256"),
+            Triple("Lsk/cq/TvBbzgUfwcz;", "PaiBIAvJIjErJ", "TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA"),
+            Triple("Led/vKO/xJHeWZwVYA;", "LNKzsVHQZOlYw", "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA"),
+            Triple("Lu4/Wwa/TGAOWLtGZGbW;", "xTxjWXIgHsLx", "TLS_ECDH_RSA_WITH_AES_256_CBC_SHA384"),
+        ).forEach { (owner, field, value) ->
+            cipherSuiteRegistry.replaceStringFieldRead(owner, field, value)
+        }
+
+        // HTTP/2's static header table has one VM-provided entry between content-encoding and
+        // content-length. Restore its standard name to avoid a null table key on first request.
+        mutableClassDefBy("Lxm/f;")
+            .methods.single { it.name == "<clinit>" && it.parameterTypes.isEmpty() && it.returnType == "V" }
+            .replaceStringFieldRead("Ldb/kYY/QDlwx;", "DqxgFcSQwrnykN", "content-language")
+
+        // Okio's quoted-text source scans for delimiters, comments and nested braces using this
+        // byte set. Restore the scan set proactively so the same missing VM value cannot break
+        // response-body processing after the app's HTTP client starts.
+        mutableClassDefBy("Ljf/y;")
+            .methods.single { it.name == "<clinit>" && it.parameterTypes.isEmpty() && it.returnType == "V" }
+            .replaceStringFieldRead("Ldb/kYY/QDlwx;", "HfCAl", "\"#'/[]{}")
+
         // PairIP normally fills this obfuscated service-name field during startup. Without that
         // payload, SystemJobScheduler passes null to Context.getSystemService and WorkManager
         // crashes while constructing its scheduler. Use Android's stable JobScheduler service key.
