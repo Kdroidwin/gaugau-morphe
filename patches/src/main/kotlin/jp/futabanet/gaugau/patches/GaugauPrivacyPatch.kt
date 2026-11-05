@@ -361,8 +361,23 @@ val gaugauPrivacyPatch = bytecodePatch(
             "invoke-static/range { p0 .. p0 }, Ljp/futabanet/gaugau/patch/DeviceId;->getId(Landroid/content/Context;)Ljava/lang/String;",
         )
 
-        // Stop AppsFlyer collection at its concrete SDK implementation.
+        // AppsFlyer's init() schedules SDK work immediately, before start() is called. Its
+        // executor thread factory reads a PairIP-initialized thread-name prefix, so merely
+        // blocking start() still leaves a crash and lets tracker initialization run. Keep the
+        // SDK inert from init onward; the app's later AppsFlyer calls are also blocked below.
         val appsFlyer = mutableClassDefBy("Lcom/appsflyer/internal/AFa1tSDK;")
+        val blockedInitializers = appsFlyer.methods.filter { method ->
+            method.name == "init" && method.returnType == "Lcom/appsflyer/AppsFlyerLib;"
+        }
+        check(blockedInitializers.isNotEmpty()) { "AppsFlyer init entry point was not found." }
+        blockedInitializers.forEach { method ->
+            check(method.parameterTypes.contains("Landroid/content/Context;")) {
+                "Unexpected AppsFlyer init overload without a Context parameter."
+            }
+            method.addInstructions(0, "return-object p0")
+        }
+
+        // Stop AppsFlyer collection at its concrete SDK implementation.
         val blockedStarts = appsFlyer.methods.filter { method ->
             method.name == "start" && method.returnType == "V" &&
                 method.parameterTypes.firstOrNull() == "Landroid/content/Context;"

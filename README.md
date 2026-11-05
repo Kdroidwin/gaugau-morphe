@@ -16,7 +16,7 @@ https://github.com/Kdroidwin/gaugau-morphe
 
 追加後、対象アプリのパッチを選び、手元の「がうがう」APKに適用します。対象APKのパッケージ名は `jp.futabanet.gaugau.app` です。
 
-> **配布状況:** リリース `v0.1.8` では、PairIP起動VMを迂回した際に未設定となるWorkManagerとOkio/OkHttpの起動文字列を補い、アプリ起動時のクラッシュを修正しました。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
+> **配布状況:** リリース `v0.1.9` では、PairIP起動VMを迂回した環境でAppsFlyerの`init()`がトラッカー用スレッドを作成して落ちる問題を修正し、初期化自体を停止します。WorkManagerとOkio/OkHttpの起動文字列修正も含みます。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
 
 ## パッチ内容
 
