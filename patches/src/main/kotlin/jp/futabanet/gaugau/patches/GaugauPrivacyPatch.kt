@@ -119,6 +119,14 @@ private fun MutableMethod.returnEarly(value: Any? = null) {
     addInstructions(0, instructions)
 }
 
+private fun MutableMethod.replaceBody(instructions: String) {
+    val mutableImplementation = checkNotNull(implementation) { "Cannot replace abstract method $name." }
+    for (index in mutableImplementation.instructions.indices.reversed()) {
+        mutableImplementation.removeInstruction(index)
+    }
+    addInstructions(0, instructions)
+}
+
 private fun MutableMethod.replaceStringFieldRead(
     fieldOwner: String,
     fieldName: String,
@@ -148,7 +156,7 @@ private fun MutableMethod.replaceStringFieldRead(
 @Suppress("unused")
 val gaugauPrivacyPatch = bytecodePatch(
     name = "GauGau privacy controls and favorites transfer",
-    description = "Adds privacy controls and favorites transfer, disables Firebase telemetry registrars, and supports devices without Google services.",
+    description = "Adds privacy controls and favorites transfer, disables tracker startup and Play Billing, and supports devices without Google services.",
     default = true,
 ) {
     compatibleWith(gaugau146)
@@ -268,6 +276,21 @@ val gaugauPrivacyPatch = bytecodePatch(
                 "Lo7/KaI/DYgH;",
                 "Xrnp",
                 "UPDATE workspec SET content_uri_triggers = x'' WHERE content_uri_triggers is NULL",
+            )
+
+        // Room's WorkManager invalidation tracker creates a temporary SQLite table with this
+        // standard pragma. PairIP leaves the obfuscated field null, which otherwise aborts the
+        // worker database's onOpen callback on GMS-free builds.
+        mutableClassDefBy("Lcom/google/android/gms/internal/play_billing/v;")
+            .methods.single {
+                it.name == "m" &&
+                    it.parameterTypes == listOf("Lc7/c;") &&
+                    it.returnType == "V"
+            }
+            .replaceStringFieldRead(
+                "Lsk/cq/TvBbzgUfwcz;",
+                "ySCjjwfUhD",
+                "PRAGMA temp_store = MEMORY;",
             )
 
         // PairIP also initializes strings used while App.onCreate constructs its OkHttp cache.
@@ -400,6 +423,26 @@ val gaugauPrivacyPatch = bytecodePatch(
         mutableClassDefBy("Lcom/google/firebase/crashlytics/FirebaseCrashlytics;")
             .methods.single { it.name == "setUserId" && it.parameterTypes == listOf("Ljava/lang/String;") }
             .returnEarly()
+        val crashlyticsGetInstance = appOnCreate.implementation!!.instructions.indices.single { index ->
+            val reference = (appOnCreate.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? MethodReference
+            reference?.definingClass == "Lcom/google/firebase/crashlytics/FirebaseCrashlytics;" &&
+                reference.name == "getInstance" &&
+                reference.parameterTypes.isEmpty()
+        }
+        val crashlyticsSetUserId = appOnCreate.implementation!!.instructions.indices.single { index ->
+            val reference = (appOnCreate.implementation!!.instructions[index] as? ReferenceInstruction)
+                ?.reference as? MethodReference
+            reference?.definingClass == "Lcom/google/firebase/crashlytics/FirebaseCrashlytics;" &&
+                reference.name == "setUserId" &&
+                reference.parameterTypes == listOf("Ljava/lang/String;")
+        }
+        check(crashlyticsSetUserId > crashlyticsGetInstance) {
+            "Unexpected Firebase Crashlytics call order in GauGau Application.onCreate."
+        }
+        for (index in crashlyticsSetUserId downTo crashlyticsGetInstance) {
+            appOnCreate.implementation!!.removeInstruction(index)
+        }
 
         // Tapjoy is an optional offerwall/reward SDK. Refuse its network bootstrap.
         val tapjoy = mutableClassDefBy("Lcom/tapjoy/Tapjoy;")
@@ -441,7 +484,76 @@ val gaugauPrivacyPatch = bytecodePatch(
             )
         }
 
-        // Piano Analytics persists and transmits queued event batches through this worker.
+        // PairIP normally fills several obfuscated property names used by Piano Analytics.
+        // Restore inert, valid keys so the registry can initialize without those protected
+        // startup values; Piano's event worker below remains disabled.
+        val pianoPropertyRegistry = mutableClassDefBy("Lzf/l;")
+        val pianoRegistryInitializer = pianoPropertyRegistry.methods.single {
+            it.name == "<clinit>" && it.parameterTypes.isEmpty() && it.returnType == "V"
+        }
+        listOf(
+            Triple("Llf/Qr/PLahGyhZoqxkRi;", "jOvxefeOKlfp", "app_custom"),
+            Triple("Llf/Qr/PLahGyhZoqxkRi;", "ZSpTcLCCl", "event_custom"),
+            Triple("Lsi/Rh/qQgvybX;", "qcXKwUHGPnODO", "site_custom"),
+            Triple("Llf/Qr/PLahGyhZoqxkRi;", "oOnrFFW", "source_custom"),
+            Triple("Lkotlin/coroutines/Rsof/AoHRK;", "brmkEfaB", "portal_custom"),
+        ).forEach { (owner, field, value) ->
+            pianoRegistryInitializer.replaceStringFieldRead(owner, field, value)
+        }
+        pianoPropertyRegistry.methods.single {
+            it.name == "a" &&
+                it.parameterTypes == listOf("Ljava/lang/String;") &&
+                it.returnType == "V"
+        }.replaceStringFieldRead("Lo9/nppy/EaBcErut;", "WMFkNCRXiFwJPu", "*")
+
+        // GauGau constructs Piano Analytics even though collection is disabled. Its constructor
+        // reads additional PairIP-only values and installs an analytics exception handler, so
+        // leave the SDK object inert after its Object constructor has run.
+        val pianoClientConstructor = mutableClassDefBy("Lwf/e;").methods.single {
+            it.name == "<init>" && it.parameterTypes == listOf(
+                "Landroid/content/Context;",
+                "Lhc/d;",
+                "Lwf/g;",
+                "Lwf/g;",
+            )
+        }
+        val pianoSuperCallIndex = pianoClientConstructor.implementation!!.instructions.indexOfFirst { instruction ->
+            val reference = (instruction as? ReferenceInstruction)?.reference as? MethodReference
+            reference?.definingClass == "Ljava/lang/Object;" &&
+                reference.name == "<init>" &&
+                reference.parameterTypes.isEmpty()
+        }
+        check(pianoSuperCallIndex >= 0) {
+            "Unexpected Piano Analytics constructor shape; could not locate its Object constructor call."
+        }
+        pianoClientConstructor.addInstructions(pianoSuperCallIndex + 1, "return-void")
+        mutableClassDefBy("Li7/a;")
+            .methods.single { it.name == "t" && it.parameterTypes.isEmpty() && it.returnType == "Lkd/c;" }
+            .addInstructions(0, "const/4 v0, 0x0\nreturn-object v0")
+
+        // Billing is unavailable without Play Store services. Keep the app's optional billing
+        // objects inert so their PairIP-dependent initialization cannot prevent manga browsing.
+        val billingClient = mutableClassDefBy("Lf8/a;")
+        val billingConstructors = billingClient.methods.filter { method ->
+            method.name == "<init>" && (
+                method.parameterTypes == listOf("Lab/v;", "Ljp/co/link_u/gaugau/App;", "Lwf/j;", "Lad/b;") ||
+                    method.parameterTypes == listOf("Lab/v;", "Ljp/co/link_u/gaugau/App;", "Lad/b;")
+                )
+        }
+        check(billingConstructors.size == 2) { "Expected both GauGau BillingClient constructors." }
+        billingConstructors.forEach { constructor ->
+            val superCallIndex = constructor.implementation!!.instructions.indexOfFirst { instruction ->
+                val reference = (instruction as? ReferenceInstruction)?.reference as? MethodReference
+                reference?.definingClass == "Ljava/lang/Object;" &&
+                    reference.name == "<init>" &&
+                    reference.parameterTypes.isEmpty()
+            }
+            check(superCallIndex >= 0) { "Unexpected BillingClient constructor shape." }
+            constructor.addInstructions(superCallIndex + 1, "return-void")
+        }
+        billingClient.methods.single { it.name == "e" && it.parameterTypes.isEmpty() && it.returnType == "V" }
+            .returnEarly()
+
         mutableClassDefBy("Lwf/q;")
             .methods.single { it.name == "run" && it.parameterTypes.isEmpty() }
             .returnEarly()
@@ -452,13 +564,44 @@ val gaugauPrivacyPatch = bytecodePatch(
             .methods.single { it.name == "c" && it.returnType == "V" && it.parameterTypes.isEmpty() }
             .returnEarly()
 
-        // Keep the activity available to the patch-added settings rows.
-        mutableClassDefBy("Ljp/co/link_u/gaugau/feature/MainActivity;")
-            .methods.single { it.name == "onResume" && it.parameterTypes.isEmpty() }
-            .addInstructions(
-                0,
-                "invoke-static/range { p0 .. p0 }, Ljp/futabanet/gaugau/patch/GaugauActivityBridge;->setCurrentActivity(Landroid/app/Activity;)V",
+        // ProfileInstaller is optional and its embedded baseline-profile asset is PairIP-backed.
+        // Skip this optimization task when the asset name is unavailable.
+        mutableClassDefBy("Lo6/d;")
+            .methods.single {
+                it.name == "t" &&
+                    it.parameterTypes == listOf(
+                        "Landroid/content/Context;",
+                        "Ljava/util/concurrent/Executor;",
+                        "Lo6/c;",
+                        "Z",
+                    ) &&
+                    it.returnType == "V"
+            }
+            .returnEarly()
+
+        // PairIP normally populates reflected superclass methods used by MainActivity's
+        // lifecycle overrides. With its startup payload disabled those Method fields are null;
+        // call the actual superclass methods directly so the Activity and settings UI can open.
+        val mainActivity = mutableClassDefBy("Ljp/co/link_u/gaugau/feature/MainActivity;")
+        mainActivity.methods.single {
+            it.name == "onCreate" &&
+                it.parameterTypes == listOf("Landroid/os/Bundle;") &&
+                it.returnType == "V"
+        }.replaceBody(
+            "invoke-super { p0, p1 }, Llg/d;->onCreate(Landroid/os/Bundle;)V\nreturn-void",
+        )
+        mainActivity.methods.single { it.name == "onResume" && it.parameterTypes.isEmpty() }
+            .replaceBody(
+                """
+                    invoke-super { p0 }, Lk/j;->onResume()V
+                    invoke-static/range { p0 .. p0 }, Ljp/futabanet/gaugau/patch/GaugauActivityBridge;->setCurrentActivity(Landroid/app/Activity;)V
+                    return-void
+                """.trimIndent(),
             )
+        mainActivity.methods.single { it.name == "onStart" && it.parameterTypes.isEmpty() }
+            .replaceBody("invoke-super { p0 }, Lk/j;->onStart()V\nreturn-void")
+        mainActivity.methods.single { it.name == "onStop" && it.parameterTypes.isEmpty() }
+            .replaceBody("invoke-super { p0 }, Lk/j;->onStop()V\nreturn-void")
 
         // Add app-local ID and favorites transfer rows to GauGau's existing Compose settings page.
         val settings = mutableClassDefBy("Lej/a;")

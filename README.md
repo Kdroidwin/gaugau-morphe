@@ -16,7 +16,7 @@ https://github.com/Kdroidwin/gaugau-morphe
 
 追加後、対象アプリのパッチを選び、手元の「がうがう」APKに適用します。対象APKのパッケージ名は `jp.futabanet.gaugau.app` です。
 
-> **配布状況:** リリース `v0.1.10` はMorphe Manager 2.xが読み込めるDEX形式のMPPです。AppsFlyerの初期化停止と、WorkManager／Okio／OkHttpの起動修正も含みます。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
+> **配布状況:** リリース `v0.1.11` はMorphe Manager 2.xが読み込めるDEX形式のMPPです。PairIPが埋める値に依存するPiano Analyticsの起動処理、Play Billing接続、MainActivityの反射型ライフサイクル呼び出しも調整しています。Morphe Managerで既にソースを追加済みの場合は、Sourcesから更新してください。
 
 ## パッチ内容
 
@@ -24,6 +24,7 @@ https://github.com/Kdroidwin/gaugau-morphe
 - AppsFlyer、Firebase Analytics、Pianoなどの広告・利用状況計測を抑制します。
 - Android IDの代わりにアプリ内IDを使い、設定からIDを確認・変更できます。
 - お気に入り漫画をJSONファイルにエクスポート／インポートできます。
+- Play Billing接続を無効化するため、アプリ内購入は利用できません。
 
 計測処理や通信の抑制は、パッチ対象として確認できたアプリ内の処理に対するものです。アプリやサーバー側の変更により、対象範囲や挙動が変わることがあります。
 
